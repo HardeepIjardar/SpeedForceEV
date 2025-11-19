@@ -1,229 +1,122 @@
-const express = require('express');
-const cors = require('cors');
+// server.js
+const express = require("express");
+const cors = require("cors");
+const { readStore, writeStore, STORE_FILE_PATH } = require("./counter-store");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// CORS configuration - allow specific origins in production
-// Set CORS_ORIGIN environment variable to your React app URL (e.g., 'https://speedforceev.in')
-// For multiple origins, use comma-separated values: 'https://speedforceev.in,https://www.speedforceev.in'
-// If CORS_ORIGIN is not set, allows all origins (useful for development)
-const corsOrigin = process.env.CORS_ORIGIN;
-
-const corsOptions = corsOrigin && corsOrigin !== '*'
-  ? {
-      origin: function (origin, callback) {
-        const allowedOrigins = corsOrigin.split(',').map(origin => origin.trim());
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin || allowedOrigins.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error('Not allowed by CORS'));
-        }
-      },
-      credentials: true,
-      optionsSuccessStatus: 200,
-    }
-  : {
-      origin: '*', // Allow all origins (development only)
-      credentials: false,
-      optionsSuccessStatus: 200,
-    };
-
-app.use(cors(corsOptions));
+// CORS
+app.use(cors({ origin: "*", credentials: false }));
 app.use(express.json());
 
-// Optional request logging middleware (can be disabled via environment variable)
-const enableRequestLogging = process.env.ENABLE_REQUEST_LOGGING === 'true';
-if (enableRequestLogging) {
-  app.use((req, res, next) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${req.method} ${req.path} - IP: ${req.ip || req.connection.remoteAddress}`);
-    next();
-  });
-}
-
-// Initial fleet stats data
+// Default stats (km will be overridden by stored value)
 let fleetStats = [
   {
     label: "Deployed",
     value: 3820,
-    icon: "mdi mdi-moped-electric",
+    icon: "mdi mdi-moped",
     isStatic: true,
   },
   {
     label: "Active",
     value: 2974,
-    icon: "mdi mdi-car-multiple",
+    icon: "mdi mdi-moped-electric",
     isStatic: false,
-    minValue: 2974,
-    maxValue: 3820,
+    minValue: 3000,
+    maxValue: 3500,
   },
   {
     label: "Kilometers",
     value: 7000000,
     icon: "mdi mdi-map-marker-distance",
     isStatic: false,
-    baseValue: 7000000,
     minKm: 150,
     maxKm: 250,
   },
 ];
 
-// Function to generate random value between min and max
-const getRandomValue = (min, max) => {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-};
+// Random value generator
+const random = (min, max) =>
+  Math.floor(Math.random() * (max - min + 1)) + min;
 
-// Function to update Active only (for initial setup)
-const updateActiveOnly = () => {
+// Update Active
+function updateActive() {
   fleetStats = fleetStats.map((item) => {
     if (item.label === "Active") {
-      // Update active value between minValue and maxValue
-      return {
-        ...item,
-        value: getRandomValue(item.minValue, item.maxValue),
-      };
+      return { ...item, value: random(item.minValue, item.maxValue) };
     }
     return item;
   });
-};
+}
 
-// Function to update fleet stats
-const updateFleetStats = () => {
+// Update kilometers + persist to disk
+async function updateStats() {
   let kmIncrement = 0;
-  
+
   fleetStats = fleetStats.map((item) => {
-    if (item.isStatic) {
-      // Keep static values unchanged
-      return item;
-    }
-
-    if (item.label === "Active") {
-      // Update active value between minValue and maxValue
-      return {
-        ...item,
-        value: getRandomValue(item.minValue, item.maxValue),
-      };
-    }
-
     if (item.label === "Kilometers") {
-      // Increment kilometers by a random amount between minKm and maxKm
-      const randomIncrement = getRandomValue(item.minKm, item.maxKm);
-      kmIncrement = randomIncrement; // Store for logging
-      return {
-        ...item,
-        value: item.value + randomIncrement, // Increment the current value
-      };
+      kmIncrement = random(item.minKm, item.maxKm);
+      return { ...item, value: Number(item.value) + kmIncrement };
     }
-
+    if (item.label === "Active") {
+      return { ...item, value: random(item.minValue, item.maxValue) };
+    }
     return item;
   });
 
-  const activeStat = fleetStats.find(s => s.label === 'Active');
-  const kmStat = fleetStats.find(s => s.label === 'Kilometers');
-  
-  console.log(`[${new Date().toISOString()}] Fleet stats updated:`, 
-    `Active: ${activeStat ? activeStat.value : 'N/A'},`,
-    `Kilometers: ${kmStat ? kmStat.value.toLocaleString('en-IN') : 'N/A'} (+${kmIncrement})`
-  );
-};
+  const km = fleetStats.find((s) => s.label === "Kilometers").value;
+  console.log(`[Update] Kilometers: ${km} (+${kmIncrement})`);
 
-// API endpoint to get live fleet stats
-app.get('/api/live-fleet-stats', (req, res) => {
-  try {
-    res.json({
-      success: true,
-      data: fleetStats,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('Error in /api/live-fleet-stats:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
+  // Persist the value
+  await writeStore({ greenKm: km });
+}
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  try {
-    res.json({
-      status: 'ok',
-      service: 'speedForceEV-server',
-      environment: NODE_ENV,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('Error in /health:', error);
-    res.status(500).json({
-      status: 'error',
-      service: 'speedForceEV-server',
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
-
-// 404 handler for undefined routes
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found',
-    path: req.path,
+// API route
+app.get("/api/live-fleet-stats", (req, res) => {
+  res.json({
+    success: true,
+    data: fleetStats,
     timestamp: new Date().toISOString(),
   });
 });
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    success: false,
-    error: NODE_ENV === 'production' ? 'Internal server error' : err.message,
-    timestamp: new Date().toISOString(),
-  });
+// Health
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", time: new Date().toISOString() });
 });
 
-// Start the server
-const server = app.listen(PORT, () => {
-  console.log(`🚀 SpeedForceEV Server is running on port ${PORT}`);
-  console.log(`🌍 Environment: ${NODE_ENV}`);
-  console.log(`📊 Live Fleet Stats API: http://localhost:${PORT}/api/live-fleet-stats`);
-  console.log(`❤️  Health Check: http://localhost:${PORT}/health`);
-  
-  // Initialize Active with a random value (kilometers stays at 7000000)
-  updateActiveOnly();
-  console.log(`📊 Initial stats - Active: ${fleetStats.find(s => s.label === 'Active').value}, Kilometers: ${fleetStats.find(s => s.label === 'Kilometers').value.toLocaleString('en-IN')} (will increment every 20 minutes)`);
-  
-  // Update stats every 20 minutes
-  // Note: Active changes randomly between 2974-3820
-  // Kilometers increments by 150-250 every 20 minutes (starting from 7000000)
-  setInterval(updateFleetStats, 20 * 60 * 1000); // 20 minutes
-  console.log(`⏰ Stats update interval: 20 minutes`);
-});
+// Start server
+(async () => {
+  try {
+    // Load stored km value
+    const store = await readStore();
+    const kmStat = fleetStats.find((s) => s.label === "Kilometers");
 
-// Handle server errors
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`❌ Port ${PORT} is already in use. Please use a different port.`);
-    process.exit(1);
-  } else {
-    console.error('❌ Server error:', error);
-    process.exit(1);
+    if (store.greenKm) {
+      kmStat.value = Number(store.greenKm);
+      console.log(
+        `Loaded persisted kilometers (${STORE_FILE_PATH}):`,
+        store.greenKm
+      );
+    } else {
+      console.log("Using default kilometers value.");
+    }
+  } catch (err) {
+    console.log("Error loading persisted km:", err);
   }
-});
 
-// Handle graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  process.exit(0);
-});
+  // Initial active update
+  updateActive();
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  process.exit(0);
-});
+  // Start API
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Counter store file: ${STORE_FILE_PATH}`);
+  });
 
+  // Update every 20 minutes
+  setInterval(() => {
+    updateStats();
+  }, 20 * 60 * 1000);
+})();

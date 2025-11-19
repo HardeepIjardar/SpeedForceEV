@@ -5,4 +5,5 @@ node_modules/
 logs/
 .env.local
 .env.*.local
-
+data/counter.json
+data/*.tmp.json
