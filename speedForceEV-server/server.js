@@ -1,4 +1,5 @@
 // server.js
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const { readStore, writeStore, STORE_FILE_PATH } = require("./counter-store");
@@ -6,11 +7,11 @@ const { readStore, writeStore, STORE_FILE_PATH } = require("./counter-store");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS
 app.use(cors({ origin: "*", credentials: false }));
 app.use(express.json());
 
-// Default stats (km will be overridden by stored value)
+const USE_SUPABASE = String(process.env.USE_SUPABASE || "false").toLowerCase() === "true";
+
 let fleetStats = [
   {
     label: "Deployed",
@@ -36,11 +37,8 @@ let fleetStats = [
   },
 ];
 
-// Random value generator
-const random = (min, max) =>
-  Math.floor(Math.random() * (max - min + 1)) + min;
+const random = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-// Update Active
 function updateActive() {
   fleetStats = fleetStats.map((item) => {
     if (item.label === "Active") {
@@ -50,7 +48,6 @@ function updateActive() {
   });
 }
 
-// Update kilometers + persist to disk
 async function updateStats() {
   let kmIncrement = 0;
 
@@ -72,7 +69,6 @@ async function updateStats() {
   await writeStore({ greenKm: km });
 }
 
-// API route
 app.get("/api/live-fleet-stats", (req, res) => {
   res.json({
     success: true,
@@ -81,24 +77,19 @@ app.get("/api/live-fleet-stats", (req, res) => {
   });
 });
 
-// Health
 app.get("/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
-// Start server
 (async () => {
   try {
-    // Load stored km value
+    console.log(`[Startup] USE_SUPABASE=${USE_SUPABASE}`);
     const store = await readStore();
     const kmStat = fleetStats.find((s) => s.label === "Kilometers");
 
     if (store.greenKm) {
       kmStat.value = Number(store.greenKm);
-      console.log(
-        `Loaded persisted kilometers (${STORE_FILE_PATH}):`,
-        store.greenKm
-      );
+      console.log(`Loaded persisted kilometers (${STORE_FILE_PATH}):`, store.greenKm);
     } else {
       console.log("Using default kilometers value.");
     }
@@ -106,17 +97,16 @@ app.get("/health", (req, res) => {
     console.log("Error loading persisted km:", err);
   }
 
-  // Initial active update
   updateActive();
 
-  // Start API
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Counter store file: ${STORE_FILE_PATH}`);
   });
 
-  // Update every 20 minutes
+  // Production: 20 minutes (20 * 60 * 1000). Current for dev/testing may be smaller.
+  // Keep your current setting; change to 20*60*1000 in production.
   setInterval(() => {
     updateStats();
-  }, 20 * 60 * 1000);
+  }, 20 * 60 * 1000); // 20 minute
 })();
