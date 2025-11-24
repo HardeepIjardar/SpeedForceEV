@@ -1,5 +1,5 @@
 // server.js
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { readStore, writeStore, STORE_FILE_PATH } = require("./counter-store");
@@ -11,6 +11,7 @@ app.use(cors({ origin: "*", credentials: false }));
 app.use(express.json());
 
 const USE_SUPABASE = String(process.env.USE_SUPABASE || "false").toLowerCase() === "true";
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
 
 let fleetStats = [
   {
@@ -81,13 +82,33 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
+// Admin-only endpoint to force a single increment + persist.
+// Use this on Render to confirm Supabase writes are working.
+app.post("/api/trigger-increment", async (req, res) => {
+  const token = req.get("x-admin-token");
+  if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
+    return res.status(401).json({ success: false, message: "unauthorized" });
+  }
+
+  try {
+    await updateStats();
+    return res.json({ success: true, data: fleetStats });
+  } catch (err) {
+    console.error("[Admin] trigger error:", err);
+    return res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
 (async () => {
   try {
+    console.log(`[Startup] NODE_ENV=${process.env.NODE_ENV}`);
     console.log(`[Startup] USE_SUPABASE=${USE_SUPABASE}`);
+    console.log("[Startup] STORE_FILE_PATH:", STORE_FILE_PATH);
+
     const store = await readStore();
     const kmStat = fleetStats.find((s) => s.label === "Kilometers");
 
-    if (store.greenKm) {
+    if (store && store.greenKm) {
       kmStat.value = Number(store.greenKm);
       console.log(`Loaded persisted kilometers (${STORE_FILE_PATH}):`, store.greenKm);
     } else {
@@ -101,12 +122,10 @@ app.get("/health", (req, res) => {
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    console.log(`Counter store file: ${STORE_FILE_PATH}`);
   });
 
-  // Production: 20 minutes (20 * 60 * 1000). Current for dev/testing may be smaller.
-  // Keep your current setting; change to 20*60*1000 in production.
+  // 20 minutes in production
   setInterval(() => {
     updateStats();
-  }, 20 * 60 * 1000); // 20 minute
+  }, 60 * 1000);
 })();

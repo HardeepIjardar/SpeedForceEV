@@ -6,7 +6,12 @@
 const fs = require("fs").promises;
 const path = require("path");
 
-const { enabled: SUPABASE_ENABLED, usedKeyName, getCounterValue, upsertCounterValue } = require("./db/supabase");
+const {
+  enabled: SUPABASE_ENABLED,
+  usedKeyName,
+  getCounterValue,
+  upsertCounterValue,
+} = require("./db/supabase");
 
 const DEFAULT_KM = Number(process.env.COUNTER_DEFAULT_KM ?? 7000000);
 const STORE_FILE_PATH =
@@ -15,7 +20,9 @@ const TEMP_FILE_PATH = `${STORE_FILE_PATH}.tmp`;
 const DATA_DIR = path.dirname(STORE_FILE_PATH);
 
 const USE_SUPABASE = String(process.env.USE_SUPABASE || "false").toLowerCase() === "true";
-const SUPABASE_WRITE_LOCAL_BACKUP = String(process.env.SUPABASE_WRITE_LOCAL_BACKUP || "false").toLowerCase() === "true";
+const SUPABASE_WRITE_LOCAL_BACKUP = String(
+  process.env.SUPABASE_WRITE_LOCAL_BACKUP || "false"
+).toLowerCase() === "true";
 
 async function ensureDir() {
   try {
@@ -27,14 +34,23 @@ async function ensureDir() {
 async function readStore() {
   await ensureDir();
 
+  console.log(
+    `[counter-store] readStore: USE_SUPABASE=${USE_SUPABASE}, SUPABASE_ENABLED=${SUPABASE_ENABLED}, key=${usedKeyName}`
+  );
+
   if (USE_SUPABASE && SUPABASE_ENABLED) {
     try {
+      console.log("[counter-store] Attempting to read green_kilometers from Supabase...");
       const val = await getCounterValue("green_kilometers");
       if (val !== null && val !== undefined) {
-        console.log(`[counter-store] Read green_kilometers from Supabase (key=${usedKeyName}): ${val}`);
+        console.log(
+          `[counter-store] Read green_kilometers from Supabase (key=${usedKeyName}): ${val}`
+        );
         return { greenKm: Number(val) };
       }
-      console.log("[counter-store] Supabase has no green_kilometers row (falling back to file/default).");
+      console.log(
+        "[counter-store] Supabase has no green_kilometers row (falling back to file/default)."
+      );
     } catch (err) {
       console.error("[counter-store] Supabase read error:", err.message || err);
       // fallthrough to file fallback
@@ -58,10 +74,17 @@ async function writeStore(obj) {
   await ensureDir();
   const value = Number(obj?.greenKm ?? DEFAULT_KM);
 
+  console.log(
+    `[counter-store] writeStore: USE_SUPABASE=${USE_SUPABASE}, SUPABASE_ENABLED=${SUPABASE_ENABLED}, key=${usedKeyName}, value=${value}`
+  );
+
   if (USE_SUPABASE && SUPABASE_ENABLED) {
     try {
       await upsertCounterValue("green_kilometers", value);
-      console.log(`[counter-store] Wrote ${value} to Supabase (key=${usedKeyName}).`);
+      console.log(
+        `[counter-store] Wrote ${value} to Supabase (key=${usedKeyName}).`
+      );
+
       if (SUPABASE_WRITE_LOCAL_BACKUP) {
         await fs.writeFile(TEMP_FILE_PATH, JSON.stringify({ greenKm: value }), "utf8");
         await fs.rename(TEMP_FILE_PATH, STORE_FILE_PATH);
