@@ -127,5 +127,5 @@ app.post("/api/trigger-increment", async (req, res) => {
   // 20 minutes in production
   setInterval(() => {
     updateStats();
-  }, 60 * 1000);
+  }, 20 * 60 * 1000);
 })();
